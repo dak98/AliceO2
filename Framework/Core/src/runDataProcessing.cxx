@@ -40,6 +40,7 @@
 #include "Framework/DataProcessorInfo.h"
 #include "Framework/DriverInfo.h"
 #include "Framework/DriverControl.h"
+#include "Framework/DataInspector.h"
 #include "ControlServiceHelpers.h"
 #include "HTTPParser.h"
 #include "DPLWebSocket.h"
@@ -962,12 +963,16 @@ int doChild(int argc, char** argv, ServiceRegistry& serviceRegistry, const o2::f
     std::unique_ptr<SimpleRawDeviceService> simpleRawDeviceService;
     std::unique_ptr<DeviceState> deviceState;
 
+    int index = std::distance(argv, std::find_if(argv, argv + argc, isInspectorArgument));
+    bool isInspected = index + 1 < argc && shouldBeInspected(argv[index + 1], spec);
+
     auto afterConfigParsingCallback = [&simpleRawDeviceService,
                                        &spec,
                                        &serviceRegistry,
                                        &deviceState,
                                        &errorPolicy,
-                                       &loop](fair::mq::DeviceRunner& r) {
+                                       &loop,
+                                       &isInspected](fair::mq::DeviceRunner& r) {
       deviceState = std::make_unique<DeviceState>();
       deviceState->loop = loop;
 
@@ -985,6 +990,8 @@ int doChild(int argc, char** argv, ServiceRegistry& serviceRegistry, const o2::f
       serviceRegistry.get<RawDeviceService>().setDevice(device.get());
       r.fDevice = std::move(device);
       fair::Logger::SetConsoleColor(false);
+
+      r.fConfig.SetProperty(INSPECTOR_ACTIVATION_PROPERTY, isInspected);
 
       /// Create all the requested services and initialise them
       for (auto& service : spec.services) {
@@ -1984,28 +1991,28 @@ int doMain(int argc, char** argv, o2::framework::WorkflowSpec const& workflow,
   enum TerminationPolicy errorPolicy;
   bpo::options_description executorOptions("Executor options");
   const char* helpDescription = "print help: short, full, executor, or processor name";
-  executorOptions.add_options()                                                                                                                //
-    ("help,h", bpo::value<std::string>()->implicit_value("short"), helpDescription)                                                            //                                                                                                       //
-    ("quiet,q", bpo::value<bool>()->zero_tokens()->default_value(false), "quiet operation")                                                    //                                                                                                         //
-    ("stop,s", bpo::value<bool>()->zero_tokens()->default_value(false), "stop before device start")                                            //                                                                                                           //
-    ("single-step", bpo::value<bool>()->zero_tokens()->default_value(false), "start in single step mode")                                      //                                                                                                             //
-    ("batch,b", bpo::value<bool>()->zero_tokens()->default_value(isatty(fileno(stdout)) == 0), "batch processing mode")                        //                                                                                                               //
-    ("no-cleanup", bpo::value<bool>()->zero_tokens()->default_value(false), "do not cleanup the shm segment")                                  //                                                                                                               //
-    ("hostname", bpo::value<std::string>()->default_value("localhost"), "hostname to deploy")                                                  //                                                                                                                 //
-    ("resources", bpo::value<std::string>()->default_value(""), "resources allocated for the workflow")                                        //                                                                                                                   //
-    ("start-port,p", bpo::value<unsigned short>()->default_value(22000), "start port to allocate")                                             //                                                                                                                     //
-    ("port-range,pr", bpo::value<unsigned short>()->default_value(1000), "ports in range")                                                     //                                                                                                                       //
-    ("completion-policy,c", bpo::value<TerminationPolicy>(&policy)->default_value(TerminationPolicy::QUIT),                                    //                                                                                                                       //
-     "what to do when processing is finished: quit, wait")                                                                                     //                                                                                                                      //
-    ("error-policy", bpo::value<TerminationPolicy>(&errorPolicy)->default_value(TerminationPolicy::QUIT),                                      //                                                                                                                          //
-     "what to do when a device has an error: quit, wait")                                                                                      //                                                                                                                            //
-    ("graphviz,g", bpo::value<bool>()->zero_tokens()->default_value(false), "produce graph output")                                            //                                                                                                                              //
-    ("timeout,t", bpo::value<uint64_t>()->default_value(0), "forced exit timeout (in seconds)")                                                //                                                                                                                                //
-    ("dds,D", bpo::value<bool>()->zero_tokens()->default_value(false), "create DDS configuration")                                             //                                                                                                                                  //
-    ("dump-workflow,dump", bpo::value<bool>()->zero_tokens()->default_value(false), "dump workflow as JSON")                                   //                                                                                                                                    //
-    ("dump-workflow-file", bpo::value<std::string>()->default_value("-"), "file to which do the dump")                                         //                                                                                                                                      //
-    ("run", bpo::value<bool>()->zero_tokens()->default_value(false), "run workflow merged so far")                                             //                                                                                                                                        //
-    ("no-IPC", bpo::value<bool>()->zero_tokens()->default_value(false), "disable IPC topology optimization")                                   //                                                                                                                                        //
+  executorOptions.add_options()                                                                                                               //
+    ("help,h", bpo::value<std::string>()->implicit_value("short"), helpDescription)                                                           //                                                                                                       //
+    ("quiet,q", bpo::value<bool>()->zero_tokens()->default_value(false), "quiet operation")                                                   //                                                                                                         //
+    ("stop,s", bpo::value<bool>()->zero_tokens()->default_value(false), "stop before device start")                                           //                                                                                                           //
+    ("single-step", bpo::value<bool>()->zero_tokens()->default_value(false), "start in single step mode")                                     //                                                                                                             //
+    ("batch,b", bpo::value<bool>()->zero_tokens()->default_value(isatty(fileno(stdout)) == 0), "batch processing mode")                       //                                                                                                               //
+    ("no-cleanup", bpo::value<bool>()->zero_tokens()->default_value(false), "do not cleanup the shm segment")                                 //                                                                                                               //
+    ("hostname", bpo::value<std::string>()->default_value("localhost"), "hostname to deploy")                                                 //                                                                                                                 //
+    ("resources", bpo::value<std::string>()->default_value(""), "resources allocated for the workflow")                                       //                                                                                                                   //
+    ("start-port,p", bpo::value<unsigned short>()->default_value(22000), "start port to allocate")                                            //                                                                                                                     //
+    ("port-range,pr", bpo::value<unsigned short>()->default_value(1000), "ports in range")                                                    //                                                                                                                       //
+    ("completion-policy,c", bpo::value<TerminationPolicy>(&policy)->default_value(TerminationPolicy::QUIT),                                   //                                                                                                                       //
+     "what to do when processing is finished: quit, wait")                                                                                    //                                                                                                                      //
+    ("error-policy", bpo::value<TerminationPolicy>(&errorPolicy)->default_value(TerminationPolicy::QUIT),                                     //                                                                                                                          //
+     "what to do when a device has an error: quit, wait")                                                                                     //                                                                                                                            //
+    ("graphviz,g", bpo::value<bool>()->zero_tokens()->default_value(false), "produce graph output")                                           //                                                                                                                              //
+    ("timeout,t", bpo::value<uint64_t>()->default_value(0), "forced exit timeout (in seconds)")                                               //                                                                                                                                //
+    ("dds,D", bpo::value<bool>()->zero_tokens()->default_value(false), "create DDS configuration")                                            //                                                                                                                                  //
+    ("dump-workflow,dump", bpo::value<bool>()->zero_tokens()->default_value(false), "dump workflow as JSON")                                  //                                                                                                                                    //
+    ("dump-workflow-file", bpo::value<std::string>()->default_value("-"), "file to which do the dump")                                        //                                                                                                                                      //
+    ("run", bpo::value<bool>()->zero_tokens()->default_value(false), "run workflow merged so far")                                            //                                                                                                                                        //
+    ("no-IPC", bpo::value<bool>()->zero_tokens()->default_value(false), "disable IPC topology optimization")                                  //                                                                                                                                        //
     ("o2-control,o2", bpo::value<bool>()->zero_tokens()->default_value(false), "create O2 Control configuration")                              //
     ("resources-monitoring", bpo::value<unsigned short>()->default_value(0), "enable cpu/memory monitoring for provided interval in seconds"); //
   // some of the options must be forwarded by default to the device
@@ -2021,6 +2028,9 @@ int doMain(int argc, char** argv, o2::framework::WorkflowSpec const& workflow,
   visibleOptions.add(executorOptions);
 
   auto physicalWorkflow = workflow;
+  if (std::any_of(argv, argv + argc, isInspectorArgument)) {
+    addDataInspector(physicalWorkflow);
+  }
   std::map<std::string, size_t> rankIndex;
   // We remove the duplicates because for the moment child get themself twice:
   // once from the actual definition in the child, a second time from the
