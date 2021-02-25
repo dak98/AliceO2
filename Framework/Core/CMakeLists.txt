@@ -104,6 +104,7 @@ o2_add_library(Framework
                        src/SHA1.cxx
                        src/Base64.cxx
                        src/DPLWebSocket.cxx
+                       src/DataInspector.cxx
                        test/TestClasses.cxx
                PRIVATE_INCLUDE_DIRECTORIES ${CMAKE_CURRENT_LIST_DIR}/src
                PUBLIC_LINK_LIBRARIES AliceO2::Common
@@ -127,6 +128,7 @@ o2_add_library(Framework
                                      ${BOOST_FILESYSTEM}
                                      arrow::gandiva_shared
                                      LibUV::LibUV
+                                     PkgConfig::ZeroMQ
                                      )
 
 o2_target_root_dictionary(Framework
