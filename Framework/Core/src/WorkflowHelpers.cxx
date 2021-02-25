@@ -22,6 +22,7 @@
 #include "Framework/CommonMessageBackends.h"
 #include "Framework/ExternalFairMQDeviceProxy.h"
 #include "Framework/Plugins.h"
+#include "Framework/DataInspector.h"
 
 #include "Headers/DataHeader.h"
 #include <algorithm>
@@ -644,6 +645,31 @@ void WorkflowHelpers::constructGraph(const WorkflowSpec& workflow,
                            doForward});
   };
 
+  auto createEdgeToDataInspector = [&workflow,
+                                    &outputs,
+                                    &maxInputTimeslicesFor,
+                                    &createEdge](size_t dataInspector,
+                                                 size_t& uniqueOutputId,
+                                                 std::string prefix,
+                                                 int& count) {
+    for (size_t producer = 0; producer < workflow.size(); producer++) {
+      if (!isInspectorDevice(workflow[producer])) {
+        for (const OutputSpec& output : workflow[producer].outputs) {
+          if (output.binding.value == prefix) {
+            for (size_t tpi = 0; tpi < maxInputTimeslicesFor(dataInspector); ++tpi) {
+              for (size_t ptpi = 0; ptpi < maxInputTimeslicesFor(producer); ++ptpi) {
+                createEdge(producer, dataInspector, tpi, ptpi, uniqueOutputId, count, false);
+                outputs.push_back(output);
+              }
+            }
+            count++;
+            uniqueOutputId++;
+          }
+        }
+      }
+    }
+  };
+
   auto errorDueToMissingOutputFor = [&workflow, &constOutputs](size_t ci, size_t ii) {
     auto input = workflow[ci].inputs[ii];
     std::ostringstream str;
@@ -696,24 +722,40 @@ void WorkflowHelpers::constructGraph(const WorkflowSpec& workflow,
   enumerateAvailableOutputs();
 
   for (size_t consumer = 0; consumer < workflow.size(); ++consumer) {
-    for (size_t input = 0; input < numberOfInputsFor(consumer); ++input) {
-      newEdgeBetweenDevices();
-
-      while (hasMatchingOutputFor(consumer, input)) {
-        auto producer = getOutputAssociatedProducer();
-        auto uniqueOutputId = getAssociateOutput();
-        for (size_t tpi = 0; tpi < maxInputTimeslicesFor(consumer); ++tpi) {
-          for (size_t ptpi = 0; ptpi < maxInputTimeslicesFor(producer); ++ptpi) {
-            createEdge(producer, consumer, tpi, ptpi, uniqueOutputId, input, isForward());
-          }
-          forwardOutputFrom(consumer, uniqueOutputId);
+    if (isInspectorDevice(workflow[consumer])) {
+      std::vector<size_t> ids(availableOutputsInfo.size());
+      std::transform(std::begin(availableOutputsInfo), std::end(availableOutputsInfo),
+                     std::begin(ids), [](LogicalOutputInfo& i) { return i.outputGlobalIndex; });
+      auto uniqueOutputIdIt = std::max_element(std::begin(ids), std::end(ids));
+      if (uniqueOutputIdIt != std::end(ids)) {
+        size_t uniqueOutputId = *uniqueOutputIdIt + 1;
+        int count = 0;
+        for (const InputSpec& input : workflow[consumer].inputs) {
+          newEdgeBetweenDevices();
+          std::string prefix = input.binding.substr(0, input.binding.find("-DataInspector"));
+          createEdgeToDataInspector(consumer, uniqueOutputId, prefix, count);
         }
-        findNextOutputFor(consumer, input);
       }
-      if (noMatchingOutputFound()) {
-        errorDueToMissingOutputFor(consumer, input);
+    } else {
+      for (size_t input = 0; input < numberOfInputsFor(consumer); ++input) {
+        newEdgeBetweenDevices();
+
+        while (hasMatchingOutputFor(consumer, input)) {
+          auto producer = getOutputAssociatedProducer();
+          auto uniqueOutputId = getAssociateOutput();
+          for (size_t tpi = 0; tpi < maxInputTimeslicesFor(consumer); ++tpi) {
+            for (size_t ptpi = 0; ptpi < maxInputTimeslicesFor(producer); ++ptpi) {
+              createEdge(producer, consumer, tpi, ptpi, uniqueOutputId, input, isForward());
+            }
+            forwardOutputFrom(consumer, uniqueOutputId);
+          }
+          findNextOutputFor(consumer, input);
+        }
+        if (noMatchingOutputFound()) {
+          errorDueToMissingOutputFor(consumer, input);
+        }
+        appendForwardsToPossibleOutputs();
       }
-      appendForwardsToPossibleOutputs();
     }
   }
 }
